@@ -1,9 +1,7 @@
 import boto3 # type: ignore
 from botocore.exceptions import ClientError # type: ignore
 import argparse
-from datetime import datetime
 
-# ----------------Parser Initialization-------------------------------------
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -41,11 +39,9 @@ def parse_arguments():
                         help='DNS record type to create/update.')
     parser.add_argument('--dns_target', type=str,
                         help='Where to point the DNS record at.')
-    parser.add_argument('--record_name', type=str,
-                        help='A name for the record.')
     return parser.parse_args()
 
-# --------------Sending parameters to correct resources------------------------------
+
 
 def select_resources(resources, session):
     restype = resources.resource
@@ -58,8 +54,6 @@ def select_resources(resources, session):
         select_route53(resources, session)
     else: 
         raise argparse.ArgumentTypeError("Not a valid resource. Valid resources are: ec2, s3 and route53.")
-    
-# --------------------------EC2 Management-------------------------------    
     
 def check_for_cli_ec2(resources, ec2, custom_filter):
      instance_check = ec2.describe_instances(
@@ -177,8 +171,6 @@ def select_ec2(resources, session):
     else:
         raise argparse.ArgumentTypeError('No username provided. Please enter --username <username>.')
 
-# --------------------S3 Management---------------------------------------
-
 def s3_create_bucket(resources, s3):
     if resources.bucket_access == "private" or resources.bucket_access == "public" and resources.access_confirmation == "True":
         bucket = s3.create_bucket(
@@ -247,13 +239,6 @@ def s3_list_bucket(resources, s3):
             continue
     return btag
 
-# TODO: TEST THAT UPLOAD WORKS.
-def s3_upload_file(resources, s3):
-    upload = s3.upload_file(resources.file_path, resources.bucket_name, resources.file_name)
-    print("File successfully uploaded.")
-    return upload
-    
-
 def select_s3(resources, session):
     s3 = session.client('s3')
     if resources.action == "create":
@@ -268,41 +253,38 @@ def select_s3(resources, session):
             raise argparse.ArgumentTypeError("No file name provided. Please use --file_name to provide a name for the file.")
         check_cli = s3_list_bucket(resources, s3)
         if resources.bucket_name in check_cli:
-            s3_upload = s3_upload_file(resources, s3)
-            # s3.upload_file(resources.file_path, resources.bucket_name, resources.file_name)
-            # print("File successfully uploaded.")
+            s3.upload_file(resources.file_path, resources.bucket_name, resources.file_name)
+            print("File successfully uploaded.")
         else:
             print("kekw")
     else:
         print("no action provided.")
 
-# ---------------Route53 Management-----------------------------------
 
-
-def route53_create(resources, r53):
-    current_time = datetime.now().strftime("%d/%m/%Y %H:%M")
-    route53 = r53.create_hosted_zone(
-        Name=resources.username + '-zone.com',
-        VPC={
-            'VPCRegion': 'us-east-1',
-            'VPCId': 'vpc-058154e6ed31674ee',    
-        },
-        CallerReference=current_time,
-        HostedZoneConfig={
-            'Comment': 'Zone created with CLI',
-            'PrivateZone': True
-        },
-    )
-    created_zone_id = route53['HostedZone']['Id']
-    cleaned_up_id = created_zone_id.replace("/hostedzone/", "")
-    print("Route53 zone successfully created:", cleaned_up_id)
-    return route53_tag(resources, r53, cleaned_up_id)
-
-
-def route53_tag(resources, r53, r53_zone):
-    route53_tagged = r53.change_tags_for_resource(
+def select_route53(resources, session):
+    r53 = session.client('route53')
+    
+    if resources.action == "create-zone":
+        route53 = r53.create_hosted_zone(
+            Name=resources.username + '-hosted-zone-test.com',
+            VPC={
+                'VPCRegion': 'us-east-1',
+                'VPCId': 'vpc-058154e6ed31674ee',    
+            },
+            CallerReference='testing6', # must be unique for each call, will
+                                      # replace with datetime later
+            HostedZoneConfig={
+                'Comment': 'something something comment',
+                'PrivateZone': True
+            },
+        )
+        created_zone_id = route53['HostedZone']['Id']
+        cleaned_up_id = created_zone_id.replace("/hostedzone/", "")
+        print("Route53 zone successfully created:", cleaned_up_id)
+        
+        route53_tagged = r53.change_tags_for_resource(
             ResourceType='hostedzone',
-            ResourceId=r53_zone,
+            ResourceId=cleaned_up_id,
             AddTags=[
                 {
                     'Key': 'Created with CLI',
@@ -314,82 +296,37 @@ def route53_tag(resources, r53, r53_zone):
                 },
             ],
         )
-    print("tags succesfully added")
-    return route53_tagged
-
-def route53_add_record(resources, r53):
-    # Only use the part of the record name before the -username.zone
-    if resources.action.lower() == "update":
-        resources.action = "upsert"
-    if resources.record_name == None:
-        raise argparse.ArgumentTypeError("No record name provided. Please use --record_name to provide a name.")
-    elif resources.record_type == None:
-        raise argparse.ArgumentTypeError("No record type provided. Please use --record_type to provide one.")
-    elif resources.dns_target == None:
-        raise argparse.ArgumentTypeError("No DNS target provided. Please provide one with --dns_target")
-    elif resources.zone_id == None:
-        raise argparse.ArgumentTypeError("No hosted zone id provided. Use --zone_id to provide one.")
-    else:
-        checking_for_tags = route53_check_tags(resources, r53)
-        if checking_for_tags == '1':
-            route53_record = r53.change_resource_record_sets(
-                    HostedZoneId=resources.zone_id,
-                    ChangeBatch={
-                        'Changes': [
-                            {
-                                'Action': resources.action.upper(),
-                                'ResourceRecordSet': {
-                                    'Name': resources.record_name + '.' + resources.username + '-zone.com',
-                                    'Type': resources.record_type,
-                                    'TTL': 300,
-                                    'ResourceRecords': [
-                                        {
-                                        'Value': resources.dns_target
-                                        }, 
-                                    ],
-                                },
-                            },
-                        ]
-                    },
-                )
-            print("Record edited successfully.")
-            return route53_record
-        else:
-            print("fuck")
-    
-
-def route53_check_tags(resources, r53):
-    r53_check = r53.list_tags_for_resource(
-        ResourceType='hostedzone',
-        ResourceId=resources.zone_id,
-    )
-    for tag in r53_check['ResourceTagSet']['Tags']:
-        if tag['Key'] == 'Created with CLI':
-            print("ok")
-            # return r53_check['ResourceTagSet']['Tags']
-            return "1"
-
-def select_route53(resources, session):
-    # TODO: CHECK THAT ROUTE53 WAS CREATED VIA CLI.
-    # TODO: MAKE THE OPTION TO MAKE IT PUBLIC????
-    allowed_action = ['update', 'upsert', 'create-zone', 'create', 'delete']
-    r53 = session.client('route53')
-    if resources.username == None:
-        raise argparse.ArgumentTypeError("No username provided. Please provide username with --username.")
-    elif resources.action == None:
-        raise argparse.ArgumentTypeError("No action provided. Please use --action to provide an action.")
-    elif resources.action.lower() not in allowed_action:
-        raise argparse.ArgumentTypeError("Invalid action. Valid actions are:", allowed_action)
-
-    if resources.action == "create-zone":
-        route53 = route53_create(resources, r53)
+        print("tags succesfully added")
         
     elif resources.action.lower() == "create" or "delete" or "update" or "upsert":
-        route53_record = route53_add_record(resources, r53)
+        # the actual accepted parameter for update is upsert, so:
+        if resources.action == "update":
+            resources.action == "upsert"
+        route53_record = r53.change_resource_record_sets(
+            HostedZoneId=resources.zone_id,
+            ChangeBatch={
+                'Changes': [
+                    {
+                        'Action': resources.action.upper(),
+                        'ResourceRecordSet': {
+                            'Name': resources.username + '-test-record.valtest-hosted-zone-test.com',
+                            'Type': resources.record_type,
+                            'TTL': 300,
+                            # TODO: let the user choose where they want the dns to point to
+                            'ResourceRecords': [
+                                {
+                                'Value': '10.0.0.5'
+                                }, 
+                            ],
+                        },
+                    },
+                ]
+            },
+        )
+        print("success")
     
     else:
-        raise argparse.ArgumentTypeError("Unexpected exception occurred.")
-
+        return print("route53 init")
     
     
 
