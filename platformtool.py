@@ -69,19 +69,89 @@ def check_for_cli_ec2(resources, ec2, custom_filter):
                 ],
             )    
      return instance_check
+ 
+def ec2_list(resources, ec2, custom_filter):
+    instances = ec2.describe_instances(Filters=custom_filter)
+    for reservation in instances['Reservations']:
+        for instance in reservation['Instances']:
+                    instance_id = instance['InstanceId']
+                    print(instance_id)
+    print("Listed all EC2 instances for this user.")
     
+def ec2_create(resources, ec2, imageID, allowed_instance_types):
+    if resources.amount:
+        if 0 < resources.amount <= 2:
+            if resources.instance_type in allowed_instance_types:
+                for i in range(resources.amount):
+                    instance = ec2.run_instances(
+                        ImageId = imageID,
+                        InstanceType=resources.instance_type,
+                        MinCount=1,
+                        MaxCount=1,
+                        TagSpecifications=[
+                            {
+                                'ResourceType': 'instance',
+                                'Tags': [
+                                    {
+                                        'Key': 'Name',
+                                        'Value': resources.username + '-' + resources.ami_choice + str(i + 1),
+                                    },
+                                    {
+                                        'Key': 'Created with CLI',
+                                        'Value': 'True'
+                                    },
+                                    {
+                                        'Key': 'Creator',
+                                        'Value': resources.username
+                                    },
+                                ]
+                            }
+                        ],
+                        Placement={
+                            'AvailabilityZone': 'us-east-1a'
+                        },
+                        SubnetId='subnet-0992c1cd4b004598c'
+                            
+                    )
+                    print("Instance created:", instance['Instances'][0]['InstanceId'])
+            else:
+                raise argparse.ArgumentTypeError('Either no --instance_type provided, or the instance type is not valid. \
+                    The allowed instance types are: t3.nano, t4g.nano, t2.micro')
+        else:
+            raise argparse.ArgumentTypeError('Invalid amount of instances. You can only create up to 2 instances.')
+    else:
+        raise argparse.ArgumentTypeError('No amount provided. Please use --amount <amount of instances to create>.\
+            You can only create up to 2 instances.')        
+
+def ec2_start(resources, ec2, custom_filter):
+    instance_check = check_for_cli_ec2(resources, ec2, custom_filter)
+    if not instance_check['Reservations']:
+        print("Instance wasn't created with CLI.")
+    else:
+        instances = ec2.start_instances(
+            InstanceIds=[
+                resources.ec2_id,
+            ],
+        )
+        print("Successfully started instance:", resources.ec2_id)
+
+def ec2_stop(resources, ec2, custom_filter):
+    instance_check = check_for_cli_ec2(resources, ec2, custom_filter)
+    if not instance_check['Reservations']:
+        print("Instance wasn't created with CLI.")
+    else:
+        instances = ec2.stop_instances(
+            InstanceIds=[
+                resources.ec2_id,
+            ],
+        )    
+        print('Successfully stopped instance:', resources.ec2_id)
+
 def select_ec2(resources, session):
     if resources.username:
-        ec2 = session.client('ec2') # initializing the ec2 modules
-        allowed_instance_types = ['t2.micro']
-        image = resources.ami_choice
-        if image.lower() == "ubuntu":
-            imageID = 'ami-0e86e20dae9224db8'
-        elif image.lower() == "amazon linux":
-            imageID = 'ami-0182f373e66f89c85'
-        else: 
-            raise argparse.ArgumentTypeError("Invalid AMI selected. Only valid options are Ubuntu and Amazon Linux.")
-            
+        ec2 = session.client('ec2') # initializing the ec2 module
+        
+        # Adding a custom filter for easy tag checking.
         custom_filter = [
             {
             'Name':'tag:Created with CLI',
@@ -92,95 +162,35 @@ def select_ec2(resources, session):
              'Values': [resources.username]
             }
             ]
-            
         if resources.action == "list":
-            instances = ec2.describe_instances(Filters=custom_filter)
-            for reservation in instances['Reservations']:
-                for instance in reservation['Instances']:
-                            instance_id = instance['InstanceId']
-                            print(instance_id)
-            print("Listed all EC2 instances for this user.")
-            
-        elif resources.action == "create":
-            if resources.amount:
-                if 0 < resources.amount <= 2:
-                    if resources.instance_type in allowed_instance_types:
-                        for i in range(resources.amount):
-                            instance = ec2.run_instances(
-                                ImageId = imageID,
-                                InstanceType=resources.instance_type,
-                                MinCount=1,
-                                MaxCount=1,
-                                TagSpecifications=[
-                                    {
-                                        'ResourceType': 'instance',
-                                        'Tags': [
-                                            {
-                                                'Key': 'Name',
-                                                'Value': resources.username + resources.ami_choice + str(i + 1),
-                                            },
-                                            {
-                                                'Key': 'Created with CLI',
-                                                'Value': 'True'
-                                            },
-                                            {
-                                                'Key': 'Creator',
-                                                'Value': resources.username
-                                            },
-                                        ]
-                                    }
-                                ],
-                                Placement={
-                                    'AvailabilityZone': 'us-east-1a'
-                                },
-                                SubnetId='subnet-0992c1cd4b004598c'
-                                    
-                            )
-                            print("Instance created:", instance['Instances'][0]['InstanceId'])
-                    else:
-                        raise argparse.ArgumentTypeError('Either no --instance_type provided, or the instance type is not valid. \
-                            The allowed instance types are: t3.nano, t4g.nano, t2.micro')
-                else:
-                    raise argparse.ArgumentTypeError('Invalid amount of instances. You can only create up to 2 instances.')
-            else:
-                raise argparse.ArgumentTypeError('No amount provided. Please use --amount <amount of instances to create>.\
-                    You can only create up to 2 instances.')    
-       
+            instances = ec2_list(resources, ec2, custom_filter)
         elif resources.action == "start":
-            instance_check = check_for_cli_ec2(resources, ec2, custom_filter)
-            if not instance_check['Reservations']:
-                print("Instance wasn't created with CLI.")
-            else:
-                instances = ec2.start_instances(
-                    InstanceIds=[
-                        resources.ec2_id,
-                    ],
-                )
-                print("Successfully started instance:", resources.ec2_id)
-            print("Starting ec2s")
-
+                instance_start = ec2_start(resources, ec2, custom_filter)
         elif resources.action == "stop":
-            instance_check = check_for_cli_ec2(resources, ec2, custom_filter)
-            if not instance_check['Reservations']:
-                print("Instance wasn't created with CLI.")
-            else:
-                instances = ec2.stop_instances(
-                InstanceIds=[
-                    resources.ec2_id,
-                ],
-            )    
-                print('Successfully stopped instance:', resources.ec2_id)
-                  
-            print("Stopping ec2s")
+                instance_stop = ec2_stop(resources, ec2, custom_filter)
+                        
         else:
-            print("get good")
+            # Adding an AMI choice & an allowed instance list
+            allowed_instance_types = ['t2.micro']
+            image = resources.ami_choice
+            if image.lower() == "ubuntu":
+                imageID = 'ami-0e86e20dae9224db8'
+            elif image.lower() == "amazon linux":
+                imageID = 'ami-0182f373e66f89c85'
+            else: 
+                raise argparse.ArgumentTypeError("Invalid AMI selected. Only valid options are Ubuntu and Amazon Linux.")
+
+            if resources.action == "create":
+                instance = ec2_create(resources, ec2, imageID, allowed_instance_types)   
+            else:
+                argparse.ArgumentTypeError("A valid action wasn't provided.")
     else:
         raise argparse.ArgumentTypeError('No username provided. Please enter --username <username>.')
 
 # --------------------S3 Management---------------------------------------
 
 def s3_create_bucket(resources, s3):
-    if resources.bucket_access == "private" or resources.bucket_access == "public" and resources.access_confirmation == "True":
+    if resources.bucket_access == "private" or resources.bucket_access == "public" and resources.access_confirmation.lower() == "true":
         bucket = s3.create_bucket(
                         ACL='private',
                         Bucket=resources.username + '-bucket',
@@ -214,7 +224,7 @@ def s3_tag_bucket(resources, s3, bucket,):
         return s3_public_bucket(resources, s3, bucket)
 
 def s3_public_bucket(resources, s3, bucket):
-    if resources.access_confirmation == "True":
+    if resources.access_confirmation.lower() == "true":
         public_bucket = s3.put_public_access_block(
                             Bucket=bucket,
                             PublicAccessBlockConfiguration={
@@ -231,7 +241,7 @@ def s3_public_bucket(resources, s3, bucket):
     
 def s3_list_bucket(resources, s3):
     bucket = s3.list_buckets()
-    btag = []
+    btag = [] # list to append valid buckets to
     for i in bucket['Buckets']:
         bucket_name = i['Name']
         
@@ -242,12 +252,10 @@ def s3_list_bucket(resources, s3):
             for tag in tags.get('TagSet', []):
                 if tag['Key'] == 'Created with CLI':
                     btag.append(bucket_name)
-                    print(bucket_name, tag)
         except ClientError:
             continue
     return btag
 
-# TODO: TEST THAT UPLOAD WORKS.
 def s3_upload_file(resources, s3):
     upload = s3.upload_file(resources.file_path, resources.bucket_name, resources.file_name)
     print("File successfully uploaded.")
@@ -269,12 +277,11 @@ def select_s3(resources, session):
         check_cli = s3_list_bucket(resources, s3)
         if resources.bucket_name in check_cli:
             s3_upload = s3_upload_file(resources, s3)
-            # s3.upload_file(resources.file_path, resources.bucket_name, resources.file_name)
-            # print("File successfully uploaded.")
+
         else:
-            print("kekw")
+            raise argparse.ArgumentTypeError("Bucket wasn't created with CLI.")
     else:
-        print("no action provided.")
+        raise argparse.ArgumentTypeError("No valid action was provided.")
 
 # ---------------Route53 Management-----------------------------------
 
@@ -355,7 +362,7 @@ def route53_add_record(resources, r53):
             print("Record edited successfully.")
             return route53_record
         else:
-            print("fuck")
+            raise argparse.ArgumentTypeError("Hosted Zone wasn't created with CLI.")
     
 
 def route53_check_tags(resources, r53):
@@ -365,13 +372,9 @@ def route53_check_tags(resources, r53):
     )
     for tag in r53_check['ResourceTagSet']['Tags']:
         if tag['Key'] == 'Created with CLI':
-            print("ok")
-            # return r53_check['ResourceTagSet']['Tags']
             return "1"
 
 def select_route53(resources, session):
-    # TODO: CHECK THAT ROUTE53 WAS CREATED VIA CLI.
-    # TODO: MAKE THE OPTION TO MAKE IT PUBLIC????
     allowed_action = ['update', 'upsert', 'create-zone', 'create', 'delete']
     r53 = session.client('route53')
     if resources.username == None:
