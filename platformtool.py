@@ -43,6 +43,8 @@ def parse_arguments():
                         help='Where to point the DNS record at.')
     parser.add_argument('--record_name', type=str,
                         help='A name for the record.')
+    parser.add_argument('--zone_type', type=str,
+                        help='Select between a public or a private hosted zone.')
     return parser.parse_args()
 
 # --------------Sending parameters to correct resources------------------------------
@@ -285,9 +287,24 @@ def select_s3(resources, session):
 
 # ---------------Route53 Management-----------------------------------
 
+def route53_create_public(resources, r53):
+    current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    route53 = r53.create_hosted_zone(
+        Name=resources.username + '-zone.com',
+        CallerReference=current_time,
+        HostedZoneConfig={
+            'Comment': 'Zone created with CLI',
+            'PrivateZone': False
+        },
+    )
+    created_zone_id = route53['HostedZone']['Id']
+    cleaned_up_id = created_zone_id.replace("/hostedzone/", "")
+    print("Route53 zone successfully created:", cleaned_up_id)
+    return route53_tag(resources, r53, cleaned_up_id)
+    
 
 def route53_create(resources, r53):
-    current_time = datetime.now().strftime("%d/%m/%Y %H:%M")
+    current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     route53 = r53.create_hosted_zone(
         Name=resources.username + '-zone.com',
         VPC={
@@ -384,9 +401,17 @@ def select_route53(resources, session):
     elif resources.action.lower() not in allowed_action:
         raise argparse.ArgumentTypeError("Invalid action. Valid actions are:", allowed_action)
 
+
     if resources.action == "create-zone":
-        route53 = route53_create(resources, r53)
-        
+        if resources.zone_type == None:
+            raise argparse.ArgumentTypeError("No --zone_type provided. Please use --zone_type public/private.")
+        elif resources.zone_type.lower() == "public":
+            route53 = route53_create_public(resources, r53)
+        elif resources.zone_type.lower() == "private":
+            route53 = route53_create(resources, r53)
+        else:
+            raise argparse.ArgumentTypeError("Invalid zone_type. --zone_type only accepts: public, private.")
+            
     elif resources.action.lower() == "create" or "delete" or "update" or "upsert":
         route53_record = route53_add_record(resources, r53)
     
