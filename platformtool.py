@@ -118,7 +118,7 @@ def ec2_create(resources, ec2, imageID, allowed_instance_types):
                     print("Instance created:", instance['Instances'][0]['InstanceId'])
             else:
                 raise argparse.ArgumentTypeError('Either no --instance_type provided, or the instance type is not valid. \
-                    The allowed instance types are: t3.nano, t4g.nano, t2.micro')
+                    The allowed instance types are: t3.nano, t4g.nano')
         else:
             raise argparse.ArgumentTypeError('Invalid amount of instances. You can only create up to 2 instances.')
     else:
@@ -173,7 +173,7 @@ def select_ec2(resources, session):
                         
         else:
             # Adding an AMI choice & an allowed instance list
-            allowed_instance_types = ['t2.micro']
+            allowed_instance_types = ['t3.nano', 't4g.nano']
             image = resources.ami_choice
             if image.lower() == "ubuntu":
                 imageID = 'ami-0e86e20dae9224db8'
